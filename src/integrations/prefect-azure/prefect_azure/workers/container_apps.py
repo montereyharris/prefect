@@ -19,7 +19,6 @@ prefect worker start --pool 'my-work-pool' --type azure-container-apps
 Replace ``my-work-pool`` with the name of your work pool.
 """
 
-import sys
 import time
 from enum import Enum
 from typing import TYPE_CHECKING, Any, List, Optional
@@ -769,11 +768,6 @@ class AzureContainerAppsWorker(
                 f"Container Apps Job '{job_name}' execution "
                 f"'{execution_name}' not found."
             )
-
-    @staticmethod
-    def _write_output_line(line: str) -> None:
-        """Write a single log line to stderr (mirrors the ACI worker helper)."""
-        print(line, file=sys.stderr)
 
     @property
     def _log_prefix(self) -> str:

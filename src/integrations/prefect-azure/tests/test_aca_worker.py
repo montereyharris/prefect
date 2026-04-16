@@ -77,9 +77,13 @@ def base_config_values(aca_credentials):
 
 
 async def build_job_configuration(
-    base_values: dict, overrides: dict | None = None, run_prep: bool = True
+    base_values: dict, overrides: dict | None = None
 ) -> AzureContainerAppsJobConfiguration:
-    """Helper that produces a prepared AzureContainerAppsJobConfiguration."""
+    """Test helper that builds an AzureContainerAppsJobConfiguration from values.
+
+    Does NOT call ``prepare_for_flow_run``; call that separately when needed
+    (e.g. to inject flow run env vars and labels before asserting on them).
+    """
     values = {**base_values, **(overrides or {})}
     variables = AzureContainerAppsVariables(**values)
 
@@ -87,15 +91,9 @@ async def build_job_configuration(
         "job_configuration": AzureContainerAppsJobConfiguration.json_template(),
         "variables": variables.model_dump(),
     }
-    config = await AzureContainerAppsJobConfiguration.from_template_and_values(
+    return await AzureContainerAppsJobConfiguration.from_template_and_values(
         json_config, values
     )
-
-    if run_prep:
-        # worker_flow_run is not injected here; tests that need prep pass it explicitly
-        pass
-
-    return config
 
 
 @pytest.fixture
@@ -229,7 +227,7 @@ class TestAzureContainerAppsJobConfiguration:
         # Override the command to None and do NOT call prepare_for_flow_run,
         # because that method injects a default command from the flow run context.
         config = await build_job_configuration(
-            base_config_values, {"command": None}, run_prep=False
+            base_config_values, {"command": None}
         )
         # Manually clear the command to simulate the no-command case
         config.command = None
