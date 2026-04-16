@@ -8,6 +8,6 @@ Introduce Kubernetes-like awareness layer for ACA by adapting concepts from obse
 Add ACA-facing docs and usage examples in README.md, including parity/contrast with ACI behavior and clear worker type configuration fields.
 Add tests mirroring ACI and Kubernetes confidence areas in tests (new ACA worker unit tests + credentials/job translation tests) and ensure compatibility with existing worker/block standards patterns.
 Further Considerations
-Should ACA runtime target Container Apps Jobs only, Apps only, or both? Option A: Jobs-first (simpler parity), Option B: dual-mode, Option C: Apps-first long-running model.
-How much “awareness” is required in v1? Option A: terminal state + logs, Option B: add event stream + failure taxonomy, Option C: full watcher/diagnostics parity with Kubernetes.
-Should ACA reuse existing Azure credentials block as-is or introduce an ACA-specific block surface for environment/resource targeting?
+ACA runtime target Container Apps Jobs only, Apps only, or both? Option A: Jobs-first (simpler parity), 
+How much “awareness” is required in v1? Option C: full watcher/diagnostics parity with Kubernetes.
+ACA reuse existing Azure credentials block as-is.
