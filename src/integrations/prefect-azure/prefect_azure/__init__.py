@@ -6,6 +6,7 @@ from .credentials import (  # noqa
     AzureDevopsCredentials,
 )
 from .workers.container_instance import AzureContainerWorker  # noqa
+from .workers.container_apps import AzureContainerAppsWorker  # noqa
 from .blob_storage import AzureBlobStorageContainer  # noqa
 from .repository import AzureDevopsRepository
 
@@ -15,6 +16,7 @@ __all__ = [
     "AzureMlCredentials",
     "AzureContainerInstanceCredentials",
     "AzureContainerWorker",
+    "AzureContainerAppsWorker",
     "AzureBlobStorageContainer",
     "AzureDevopsCredentials",
     "AzureDevopsRepository",
