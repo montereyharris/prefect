@@ -26,6 +26,7 @@ dependencies = [
   "aiohttp",
   "azure_identity>=1.10",
   "azure_mgmt_containerinstance>=10.0",
+  "azure-mgmt-appcontainers>=3.0",
   "azure-mgmt-resource>=21.2,<25",
   "prefect>=3.6.17",
   "prefect-docker>=0.6.2",
@@ -43,6 +44,7 @@ all_extras = ["azure-cosmos", "azure-storage-blob", "azureml-core"]
 dev = [
   "aiohttp",
   "azure-cosmos",
+  "azure-mgmt-appcontainers>=3.0",
   "azure-storage-blob",
   "azureml-core",
   "coverage",
