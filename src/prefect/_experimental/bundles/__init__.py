@@ -23,7 +23,10 @@ from typing_extensions import Literal, NotRequired, TypeAlias
 
 import anyio
 import cloudpickle  # pyright: ignore[reportMissingTypeStubs]
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.version import Version
 
+import prefect
 from prefect._internal.control_listener import configure_from_env
 from prefect.client.schemas.objects import FlowRun
 from prefect.context import SettingsContext, get_settings_context, serialize_context
@@ -36,7 +39,10 @@ from prefect.settings.models.root import Settings
 from prefect.utilities.processutils import sanitize_subprocess_env
 from prefect.utilities.slugify import slugify
 
-from prefect._experimental._launchers import validate_bundle_step_launcher
+from prefect._experimental._launchers import (
+    get_launcher_for_side,
+    validate_bundle_step_launcher,
+)
 
 from .execute import execute_bundle_from_file
 from ._file_collector import FileCollector
@@ -411,38 +417,48 @@ def create_bundle_for_flow_run(
     """
     context = context or serialize_context()
 
-    dependencies = (
-        subprocess.check_output(
-            [
-                _get_uv_path(),
-                "pip",
-                "freeze",
-                # Exclude editable installs because we won't be able to install them in the execution environment
-                "--exclude-editable",
-            ]
+    # Skip `uv pip freeze` when the execution side of the flow's launcher
+    # opts out of uv-based launchers. The `dependencies` field is only
+    # consumed by `execute_bundle_in_subprocess` (which uses `uv pip install`);
+    # custom execution launchers are responsible for their own environment.
+    # Upload-only launcher overrides still use `uv run` at execution time and
+    # therefore still need the dependency snapshot.
+    flow_launcher = getattr(flow, "launcher", None)
+    if get_launcher_for_side(flow_launcher, "execution") is None:
+        dependencies = (
+            subprocess.check_output(
+                [
+                    _get_uv_path(),
+                    "pip",
+                    "freeze",
+                    # Exclude editable installs because we won't be able to install them in the execution environment
+                    "--exclude-editable",
+                ]
+            )
+            .decode()
+            .strip()
         )
-        .decode()
-        .strip()
-    )
 
-    # Remove dependencies installed from a local file path because we won't be able
-    # to install them in the execution environment. The user will be responsible for
-    # making sure they are available in the execution environment
-    filtered_dependencies: list[str] = []
-    file_dependencies: list[str] = []
-    for line in dependencies.split("\n"):
-        if "file://" in line:
-            file_dependencies.append(line)
-        else:
-            filtered_dependencies.append(line)
-    dependencies = "\n".join(filtered_dependencies)
-    if file_dependencies:
-        logger.warning(
-            "The following dependencies were installed from a local file path and will not be "
-            "automatically installed in the execution environment: %s. If these dependencies "
-            "are not available in the execution environment, your flow run may fail.",
-            "\n".join(file_dependencies),
-        )
+        # Remove dependencies installed from a local file path because we won't be able
+        # to install them in the execution environment. The user will be responsible for
+        # making sure they are available in the execution environment
+        filtered_dependencies: list[str] = []
+        file_dependencies: list[str] = []
+        for line in dependencies.split("\n"):
+            if "file://" in line:
+                file_dependencies.append(line)
+            else:
+                filtered_dependencies.append(line)
+        dependencies = "\n".join(filtered_dependencies)
+        if file_dependencies:
+            logger.warning(
+                "The following dependencies were installed from a local file path and will not be "
+                "automatically installed in the execution environment: %s. If these dependencies "
+                "are not available in the execution environment, your flow run may fail.",
+                "\n".join(file_dependencies),
+            )
+    else:
+        dependencies = ""
 
     # Collect and package included files if specified
     files_key: str | None = None
@@ -603,6 +619,52 @@ def execute_bundle_in_subprocess(
     return process
 
 
+def _pin_prefect_in_bundle_step_requires(requires: list[str]) -> list[str]:
+    """
+    Ensure the `uv run --with` requirements for an outer bundle-step process
+    include the exact current publishable Prefect version.
+
+    The outer bundle-step process imports Prefect before the bundle's frozen
+    dependencies are installed, so transitive constraints like
+    `prefect>=3.6.24` from integration packages can otherwise resolve an
+    older stable Prefect even when the bundle was built against a newer
+    version. Pinning `prefect=={prefect.__version__}` keeps the outer
+    process on the same version the bundle was built with.
+
+    - Rewrites any existing `prefect` (or `prefect[...]`) requirement to the
+      exact current version, preserving extras and markers.
+    - Appends `prefect=={prefect.__version__}` if no Prefect requirement is
+      present.
+    - Returns the requirements unchanged for local/unpublishable versions,
+      matching the behavior of `prefect._internal.installation`.
+    """
+    version = Version(prefect.__version__)
+    if version.local:
+        return requires
+
+    pinned_version = prefect.__version__
+    updated: list[str] = []
+    found_prefect = False
+    for requirement in requires:
+        try:
+            parsed = Requirement(requirement)
+        except InvalidRequirement:
+            updated.append(requirement)
+            continue
+        if parsed.name.lower() != "prefect":
+            updated.append(requirement)
+            continue
+        found_prefect = True
+        extras = f"[{','.join(sorted(parsed.extras))}]" if parsed.extras else ""
+        marker = f" ; {parsed.marker}" if parsed.marker else ""
+        updated.append(f"prefect{extras}=={pinned_version}{marker}")
+
+    if not found_prefect:
+        updated.append(f"prefect=={pinned_version}")
+
+    return updated
+
+
 def convert_step_to_command(
     step: dict[str, Any], key: str, quiet: bool = False
 ) -> list[str]:
@@ -641,6 +703,13 @@ def convert_step_to_command(
 
         if quiet:
             command.append("--quiet")
+
+        # Pin the outer bundle-step process to the current publishable Prefect
+        # version so integration `requires` like `prefect-aws>=0.5.5` cannot
+        # resolve an older stable Prefect via transitive `prefect>=...`
+        # constraints before the bundle's frozen dependencies are applied.
+        if requires:
+            requires = _pin_prefect_in_bundle_step_requires(requires)
 
         # Add the `--with` argument to handle dependencies for running the step
         if requires:
